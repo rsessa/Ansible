@@ -8,6 +8,7 @@
     ca_root_validity_years: 50
     sub_ca_validity_years: 10
     windows_server_iso_url: "https://path.to/Windows_Server_2022.iso"
+    parent_disk_path: "C:\\path\\to\\parent_disk.vhdx"
     vms:
       - name: "RootCA"
         role: "root_ca"
@@ -30,9 +31,9 @@
 
   tasks:
     - name: Download Windows Server 2022 ISO
-        win_get_url:
-          url: "{{ windows_server_iso_url }}"
-          dest: "C:\\path\\to\\Windows_Server_2022.iso"
+      win_get_url:
+        url: "{{ windows_server_iso_url }}"
+        dest: "C:\\path\\to\\Windows_Server_2022.iso"
 
     - name: Create Base VM for Windows Server 2022
       win_hyperv:
@@ -56,6 +57,12 @@
         port: 5986
         timeout: 600
         state: started
+
+    - name: Create parent disk from Base VM
+      win_shell: |
+        Stop-VM -Name "WindowsServer2022Base"
+        Export-VHD -Path "C:\\path\\to\\WindowsServer2022Base\\Virtual Hard Disks\\WindowsServer2022Base.vhdx" -DestinationPath "{{ parent_disk_path }}"
+
     - name: Create and configure VMs
       win_hyperv:
         name: "{{ item.name }}"
@@ -68,7 +75,7 @@
           maximum_mb: 0  # Sin máximo
           buffer_percentage: 20  # Ajuste por defecto
         disk_type: "differencing"
-        parent_disk: "C:\\path\\to\\parent_disk.vhdx"
+        parent_disk: "{{ parent_disk_path }}"
         disk_path: "{{ item.disk_path }}"
         switch: "switch interno"
       loop: "{{ vms }}"
@@ -203,49 +210,4 @@
       loop: "{{ vms }}"
       vars:
         ansible_connection: winrm
-        ansible_user: "{{ vm_admin_user }}"
-        ansible_password: "{{ vm_admin_password }}"
-        ansible_port: 5986
-        ansible_winrm_server_cert_validation: ignore
-
-    - name: Join VMs to the Domain
-      win_domain_membership:
-        dns_domain_name: "{{ domain_name }}"
-        domain_admin_user: "{{ domain_admin_user }}"
-        domain_admin_password: "{{ domain_admin_password }}"
-        state: domain
-      when: item.role not in ["root_ca", "domain_controller"]
-      loop: "{{ vms }}"
-      vars:
-        ansible_connection: winrm
-        ansible_user: "{{ vm_admin_user }}"
-        ansible_password: "{{ vm_admin_password }}"
-        ansible_port: 5986
-        ansible_winrm_server_cert_validation: ignore
-
-    - name: Configure roles for VMs
-      block:
-        - name: Install IIS for Web Server
-          win_feature:
-            name: Web-Server
-            state: present
-          when: item.role == "webserver"
-
-        - name: Install SQL Server for Database
-          win_feature:
-            name: RSAT-SQL-Management
-            state: present
-          when: item.role == "database"
-
-        - name: Install Application Server role
-          win_feature:
-            name: Application-Server
-            state: present
-          when: item.role == "appserver"
-
-      loop: "{{ vms }}"
-      vars:
-        ansible_connection: winrm
-        ansible_user: "{{ vm_admin_user }}"
-        ansible_password: "{{ vm_admin_password }}"
-       
+        ansible_user
