@@ -1,0 +1,19 @@
+---
+- name: Deploy Windows VM on Hyper-V
+  hosts: hyperv_hosts
+  tasks:
+    - name: Create VM
+      win_hyperv:
+        name: "NewWindowsVM"
+        generation: 2
+        state: present
+        cpu_count: 4
+        memory_mb: 4096
+        disk_size_gb: 50
+        iso_path: "C:\\path\\to\\windows_iso.iso"
+        switch: "ExternalSwitch"
+
+    - name: Start VM
+      win_hyperv:
+        name: "NewWindowsVM"
+        state: running
