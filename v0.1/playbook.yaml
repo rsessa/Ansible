@@ -7,6 +7,7 @@
     domain_admin_password: "Password123!"
     ca_root_validity_years: 50
     sub_ca_validity_years: 10
+    windows_server_iso_url: "https://path.to/Windows_Server_2022.iso"
     vms:
       - name: "RootCA"
         role: "root_ca"
@@ -28,6 +29,33 @@
         disk_path: "C:\\path\\to\\appserver_diff_disk.vhdx"
 
   tasks:
+    - name: Download Windows Server 2022 ISO
+        win_get_url:
+          url: "{{ windows_server_iso_url }}"
+          dest: "C:\\path\\to\\Windows_Server_2022.iso"
+
+    - name: Create Base VM for Windows Server 2022
+      win_hyperv:
+        name: "WindowsServer2022Base"
+        generation: 2
+        state: present
+        cpu_count: 4
+        memory_mb: 2048
+        disk_size_gb: 60
+        iso_path: "C:\\path\\to\\Windows_Server_2022.iso"
+        switch: "switch interno"
+
+    - name: Start Base VM
+      win_hyperv:
+        name: "WindowsServer2022Base"
+        state: running
+
+    - name: Wait for Base VM to be ready for configuration
+      wait_for:
+        host: "WindowsServer2022Base"
+        port: 5986
+        timeout: 600
+        state: started
     - name: Create and configure VMs
       win_hyperv:
         name: "{{ item.name }}"
