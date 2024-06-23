@@ -1,19 +1,236 @@
 ---
-- name: Deploy Windows VM on Hyper-V
+- name: Deploy multiple Windows VMs on Hyper-V with Dynamic Memory, Differencing Disk, Domain Setup, and PKI
   hosts: hyperv_hosts
+  vars:
+    domain_name: "example.local"
+    domain_admin_user: "Admin"
+    domain_admin_password: "Password123!"
+    ca_root_validity_years: 50
+    sub_ca_validity_years: 10
+    vms:
+      - name: "RootCA"
+        role: "root_ca"
+        disk_path: "C:\\path\\to\\rootca_diff_disk.vhdx"
+      - name: "SubCA"
+        role: "sub_ca"
+        disk_path: "C:\\path\\to\\subca_diff_disk.vhdx"
+      - name: "DomainControllerVM"
+        role: "domain_controller"
+        disk_path: "C:\\path\\to\\dc_diff_disk.vhdx"
+      - name: "WebServerVM"
+        role: "webserver"
+        disk_path: "C:\\path\\to\\webserver_diff_disk.vhdx"
+      - name: "DatabaseVM"
+        role: "database"
+        disk_path: "C:\\path\\to\\database_diff_disk.vhdx"
+      - name: "AppServerVM"
+        role: "appserver"
+        disk_path: "C:\\path\\to\\appserver_diff_disk.vhdx"
+
   tasks:
-    - name: Create VM
+    - name: Create and configure VMs
       win_hyperv:
-        name: "NewWindowsVM"
+        name: "{{ item.name }}"
         generation: 2
         state: present
         cpu_count: 4
-        memory_mb: 4096
-        disk_size_gb: 50
-        iso_path: "C:\\path\\to\\windows_iso.iso"
-        switch: "ExternalSwitch"
+        memory_mb: 1024  # Mínimo de memoria
+        dynamic_memory:
+          minimum_mb: 1024  # Memoria mínima
+          maximum_mb: 0  # Sin máximo
+          buffer_percentage: 20  # Ajuste por defecto
+        disk_type: "differencing"
+        parent_disk: "C:\\path\\to\\parent_disk.vhdx"
+        disk_path: "{{ item.disk_path }}"
+        switch: "switch interno"
+      loop: "{{ vms }}"
 
-    - name: Start VM
+    - name: Start VMs
       win_hyperv:
-        name: "NewWindowsVM"
+        name: "{{ item.name }}"
         state: running
+      loop: "{{ vms }}"
+
+    - name: Configure Root CA
+      block:
+        - name: Install ADCS
+          win_feature:
+            name: ADCS-Cert-Authority
+            state: present
+          when: item.role == "root_ca"
+
+        - name: Configure Root CA
+          win_shell: |
+            Install-AdcsCertificationAuthority -CAType StandaloneRootCA -CACommonName "RootCA" -KeyLength 2048 -ValidityPeriod Years -ValidityPeriodUnits {{ ca_root_validity_years }}
+          when: item.role == "root_ca"
+
+        - name: Generate Root CA certificate
+          win_shell: |
+            $rootCA = Get-CA
+            $certFile = "C:\\path\\to\\rootca.cer"
+            $rootCA | Export-Certificate -FilePath $certFile -Type CertificateAuthority
+          when: item.role == "root_ca"
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin_user }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
+
+    - name: Configure Domain Controller
+      block:
+        - name: Install AD Domain Services
+          win_feature:
+            name: AD-Domain-Services
+            state: present
+          when: item.role == "domain_controller"
+
+        - name: Promote to Domain Controller
+          win_domain:
+            dns_domain_name: "{{ domain_name }}"
+            domain_admin_user: "{{ domain_admin_user }}"
+            domain_admin_password: "{{ domain_admin_password }}"
+            safe_mode_password: "{{ domain_admin_password }}"
+          when: item.role == "domain_controller"
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin_user }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
+
+    - name: Wait for Domain Controller to be ready
+      wait_for:
+        host: "{{ item.name }}"
+        port: 5986
+        timeout: 600
+        state: started
+      when: item.role == "domain_controller"
+      loop: "{{ vms }}"
+
+    - name: Configure Sub CA
+      block:
+        - name: Install ADCS
+          win_feature:
+            name: ADCS-Cert-Authority
+            state: present
+          when: item.role == "sub_ca"
+
+        - name: Join Sub CA to the Domain
+          win_domain_membership:
+            dns_domain_name: "{{ domain_name }}"
+            domain_admin_user: "{{ domain_admin_user }}"
+            domain_admin_password: "{{ domain_admin_password }}"
+            state: domain
+          when: item.role == "sub_ca"
+
+        - name: Request certificate for Sub CA from Root CA
+          win_shell: |
+            $subCARequestFile = "C:\\path\\to\\subca.req"
+            $subCACertFile = "C:\\path\\to\\subca.cer"
+            $rootCACertFile = "C:\\path\\to\\rootca.cer"
+            certreq -new -f -iv C:\\path\\to\\subca.inf -out $subCARequestFile
+            certreq -submit -config "RootCA" $subCARequestFile $subCACertFile
+            certreq -accept $subCACertFile
+          when: item.role == "sub_ca"
+
+        - name: Configure Sub CA with certificate from Root CA
+          win_shell: |
+            $subCA = Get-CA
+            $subCACertFile = "C:\\path\\to\\subca.cer"
+            $subCA | Import-Certificate -FilePath $subCACertFile -Type CertificationAuthority
+          when: item.role == "sub_ca"
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin_user }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
+
+    - name: Issue Certificates for Domain Machines
+      win_shell: |
+        $machines = @("WebServerVM", "DatabaseVM", "AppServerVM")
+        foreach ($machine in $machines) {
+          certreq -new -f -iv C:\\path\\to\\$machine.inf -out C:\\path\\to\\$machine.req
+          certreq -submit -config "SubCA" C:\\path\\to\\$machine.req C:\\path\\to\\$machine.cer
+          certreq -accept C:\\path\\to\\$machine.cer
+        }
+      when: item.role == "sub_ca"
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin_user }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
+
+    - name: Join VMs to the Domain
+      win_domain_membership:
+        dns_domain_name: "{{ domain_name }}"
+        domain_admin_user: "{{ domain_admin_user }}"
+        domain_admin_password: "{{ domain_admin_password }}"
+        state: domain
+      when: item.role not in ["root_ca", "domain_controller"]
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin_user }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
+
+    - name: Configure roles for VMs
+      block:
+        - name: Install IIS for Web Server
+          win_feature:
+            name: Web-Server
+            state: present
+          when: item.role == "webserver"
+
+        - name: Install SQL Server for Database
+          win_feature:
+            name: RSAT-SQL-Management
+            state: present
+          when: item.role == "database"
+
+        - name: Install Application Server role
+          win_feature:
+            name: Application-Server
+            state: present
+          when: item.role == "appserver"
+
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin_user }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
+
+    - name: Ensure IIS service is running for Web Server
+      win_service:
+        name: W3SVC
+        start_mode: auto
+        state: started
+      when: item.role == "webserver"
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin_user }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
+
+    - name: Ensure SQL Server service is running for Database
+      win_service:
+        name: MSSQLSERVER
+        start_mode: auto
+        state: started
+      when: item.role == "database"
+      loop: "{{ vms }}"
+      vars:
+        ansible_connection: winrm
+        ansible_user: "{{ vm_admin
