@@ -1,5 +1,3 @@
-Aquí tienes la documentación del playbook Ansible para implementación de máquinas virtuales en formato Markdown:
-
 ## Objetivo del Playbook
 
 El objetivo de este playbook de Ansible es automatizar la implementación de múltiples máquinas virtuales (VMs) en un entorno de Hyper-V utilizando Windows Server 2022 Core Data Center. Este proceso incluye la configuración de VMs con características específicas como memoria dinámica, discos de diferenciación, configuración de dominio activo, infraestructura de clave pública (PKI) con certificados de autoridad raíz y subordinada, y emisión de certificados para máquinas del dominio.
