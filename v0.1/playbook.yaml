@@ -2,38 +2,41 @@
 - name: Deploy multiple Windows VMs on Hyper-V with Dynamic Memory, Differencing Disk, Domain Setup, and PKI
   hosts: hyperv_hosts
   vars:
-    domain_name: "example.local"
-    domain_admin_user: "Admin"
-    domain_admin_password: "Password123!"
-    ca_root_validity_years: 50
-    sub_ca_validity_years: 10
-    windows_server_iso_url: "https://path.to/Windows_Server_2022.iso"
-    parent_disk_path: "C:\\path\\to\\parent_disk.vhdx"
     vms:
       - name: "RootCA"
         role: "root_ca"
-        disk_path: "C:\\path\\to\\rootca_diff_disk.vhdx"
+        disk_path: "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/rootca_diff_disk.vhdx"
       - name: "SubCA"
         role: "sub_ca"
-        disk_path: "C:\\path\\to\\subca_diff_disk.vhdx"
+        disk_path: "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/subca_diff_disk.vhdx"
       - name: "DomainControllerVM"
         role: "domain_controller"
-        disk_path: "C:\\path\\to\\dc_diff_disk.vhdx"
+        disk_path: "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/dc_diff_disk.vhdx"
       - name: "WebServerVM"
         role: "webserver"
-        disk_path: "C:\\path\\to\\webserver_diff_disk.vhdx"
+        disk_path: "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/webserver_diff_disk.vhdx"
       - name: "DatabaseVM"
         role: "database"
-        disk_path: "C:\\path\\to\\database_diff_disk.vhdx"
+        disk_path: "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/database_diff_disk.vhdx"
       - name: "AppServerVM"
         role: "appserver"
-        disk_path: "C:\\path\\to\\appserver_diff_disk.vhdx"
+        disk_path: "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/appserver_diff_disk.vhdx"
 
   tasks:
+    - name: Create Parent Directory if it doesn't exist
+      win_file:
+        path: "{{ lookup('env', 'PARENT_DISK_PATH') | dirname }}"
+        state: directory
+
+    - name: Create Virtual Disk Directory if it doesn't exist
+      win_file:
+        path: "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}"
+        state: directory
+
     - name: Download Windows Server 2022 ISO
       win_get_url:
-        url: "{{ windows_server_iso_url }}"
-        dest: "C:\\path\\to\\Windows_Server_2022.iso"
+        url: "{{ lookup('env', 'WINDOWS_SERVER_ISO_URL') }}"
+        dest: "{{ lookup('env', 'PARENT_DISK_PATH') | dirname }}/Windows_Server_2022.iso"
 
     - name: Create Base VM for Windows Server 2022
       win_hyperv:
@@ -43,7 +46,7 @@
         cpu_count: 4
         memory_mb: 2048
         disk_size_gb: 60
-        iso_path: "C:\\path\\to\\Windows_Server_2022.iso"
+        iso_path: "{{ lookup('env', 'PARENT_DISK_PATH') | dirname }}/Windows_Server_2022.iso"
         switch: "switch interno"
 
     - name: Start Base VM
@@ -61,7 +64,7 @@
     - name: Create parent disk from Base VM
       win_shell: |
         Stop-VM -Name "WindowsServer2022Base"
-        Export-VHD -Path "C:\\path\\to\\WindowsServer2022Base\\Virtual Hard Disks\\WindowsServer2022Base.vhdx" -DestinationPath "{{ parent_disk_path }}"
+        Export-VHD -Path "{{ lookup('env', 'PARENT_DISK_PATH') }}" -DestinationPath "{{ lookup('env', 'PARENT_DISK_PATH') }}"
 
     - name: Create and configure VMs
       win_hyperv:
@@ -75,7 +78,7 @@
           maximum_mb: 0  # Sin máximo
           buffer_percentage: 20  # Ajuste por defecto
         disk_type: "differencing"
-        parent_disk: "{{ parent_disk_path }}"
+        parent_disk: "{{ lookup('env', 'PARENT_DISK_PATH') }}"
         disk_path: "{{ item.disk_path }}"
         switch: "switch interno"
       loop: "{{ vms }}"
@@ -96,20 +99,20 @@
 
         - name: Configure Root CA
           win_shell: |
-            Install-AdcsCertificationAuthority -CAType StandaloneRootCA -CACommonName "RootCA" -KeyLength 2048 -ValidityPeriod Years -ValidityPeriodUnits {{ ca_root_validity_years }}
+            Install-AdcsCertificationAuthority -CAType StandaloneRootCA -CACommonName "RootCA" -KeyLength 2048 -ValidityPeriod Years -ValidityPeriodUnits {{ lookup('env', 'CA_ROOT_VALIDITY_YEARS') }}
           when: item.role == "root_ca"
 
         - name: Generate Root CA certificate
           win_shell: |
             $rootCA = Get-CA
-            $certFile = "C:\\path\\to\\rootca.cer"
+            $certFile = "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/rootca.cer"
             $rootCA | Export-Certificate -FilePath $certFile -Type CertificateAuthority
           when: item.role == "root_ca"
       loop: "{{ vms }}"
       vars:
         ansible_connection: winrm
-        ansible_user: "{{ vm_admin_user }}"
-        ansible_password: "{{ vm_admin_password }}"
+        ansible_user: "{{ lookup('env', 'DOMAIN_ADMIN_USER') }}"
+        ansible_password: "{{ lookup('env', 'DOMAIN_ADMIN_PASSWORD') }}"
         ansible_port: 5986
         ansible_winrm_server_cert_validation: ignore
 
@@ -123,16 +126,16 @@
 
         - name: Promote to Domain Controller
           win_domain:
-            dns_domain_name: "{{ domain_name }}"
-            domain_admin_user: "{{ domain_admin_user }}"
-            domain_admin_password: "{{ domain_admin_password }}"
-            safe_mode_password: "{{ domain_admin_password }}"
+            dns_domain_name: "{{ lookup('env', 'DOMAIN_NAME') }}"
+            domain_admin_user: "{{ lookup('env', 'DOMAIN_ADMIN_USER') }}"
+            domain_admin_password: "{{ lookup('env', 'DOMAIN_ADMIN_PASSWORD') }}"
+            safe_mode_password: "{{ lookup('env', 'DOMAIN_ADMIN_PASSWORD') }}"
           when: item.role == "domain_controller"
       loop: "{{ vms }}"
       vars:
         ansible_connection: winrm
-        ansible_user: "{{ vm_admin_user }}"
-        ansible_password: "{{ vm_admin_password }}"
+        ansible_user: "{{ lookup('env', 'DOMAIN_ADMIN_USER') }}"
+        ansible_password: "{{ lookup('env', 'DOMAIN_ADMIN_PASSWORD') }}"
         ansible_port: 5986
         ansible_winrm_server_cert_validation: ignore
 
@@ -155,17 +158,17 @@
 
         - name: Join Sub CA to the Domain
           win_domain_membership:
-            dns_domain_name: "{{ domain_name }}"
-            domain_admin_user: "{{ domain_admin_user }}"
-            domain_admin_password: "{{ domain_admin_password }}"
+            dns_domain_name: "{{ lookup('env', 'DOMAIN_NAME') }}"
+            domain_admin_user: "{{ lookup('env', 'DOMAIN_ADMIN_USER') }}"
+            domain_admin_password: "{{ lookup('env', 'DOMAIN_ADMIN_PASSWORD') }}"
             state: domain
           when: item.role == "sub_ca"
 
         - name: Request certificate for Sub CA from Root CA
           win_shell: |
-            $subCARequestFile = "C:\\path\\to\\subca.req"
-            $subCACertFile = "C:\\path\\to\\subca.cer"
-            $rootCACertFile = "C:\\path\\to\\rootca.cer"
+            $subCARequestFile = "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/subca.req"
+            $subCACertFile = "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/subca.cer"
+            $rootCACertFile = "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/rootca.cer"
             certreq -new -f -iv C:\\path\\to\\subca.inf -out $subCARequestFile
             certreq -submit -config "RootCA" $subCARequestFile $subCACertFile
             certreq -accept $subCACertFile
@@ -174,14 +177,14 @@
         - name: Configure Sub CA with certificate from Root CA
           win_shell: |
             $subCA = Get-CA
-            $subCACertFile = "C:\\path\\to\\subca.cer"
+            $subCACertFile = "{{ lookup('env', 'VIRTUAL_DISK_PATH') }}/subca.cer"
             $subCA | Import-Certificate -FilePath $subCACertFile -Type CertificationAuthority
           when: item.role == "sub_ca"
       loop: "{{ vms }}"
       vars:
         ansible_connection: winrm
-        ansible_user: "{{ vm_admin_user }}"
-        ansible_password: "{{ vm_admin_password }}"
+        ansible_user: "{{ lookup('env', 'DOMAIN_ADMIN_USER') }}"
+        ansible_password: "{{ lookup('env', 'DOMAIN_ADMIN_PASSWORD') }}"
         ansible_port: 5986
         ansible_winrm_server_cert_validation: ignore
 
@@ -210,4 +213,7 @@
       loop: "{{ vms }}"
       vars:
         ansible_connection: winrm
-        ansible_user
+        ansible_user: "{{ lookup('env', 'DOMAIN_ADMIN_USER') }}"
+        ansible_password: "{{ lookup('env', 'DOMAIN_ADMIN_PASSWORD') }}"
+        ansible_port: 5986
+        ansible_winrm_server_cert_validation: ignore
