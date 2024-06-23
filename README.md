@@ -40,6 +40,7 @@ all_vms:
   - name: "AppServerVM"
     role: "appserver"
     disk_path: "C:\\path\\to\\appserver_diff_disk.vhdx"
+```
 
 ### Ejecución del Playbook
 
