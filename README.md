@@ -1,18 +1,20 @@
 Aquí tienes la documentación del playbook Ansible para implementación de máquinas virtuales en formato Markdown:
 
-```markdown
-# Documentación del Playbook Ansible para Implementación de Máquinas Virtuales en Windows Server 2022 en Hyper-V
-
 ## Objetivo del Playbook
+
 El objetivo de este playbook de Ansible es automatizar la implementación de múltiples máquinas virtuales (VMs) en un entorno de Hyper-V utilizando Windows Server 2022 Core Data Center. Este proceso incluye la configuración de VMs con características específicas como memoria dinámica, discos de diferenciación, configuración de dominio activo, infraestructura de clave pública (PKI) con certificados de autoridad raíz y subordinada, y emisión de certificados para máquinas del dominio.
 
 ## Uso del Playbook
+
 ### Requisitos Previos
+
 - Asegúrate de tener un entorno de Ansible configurado y funcionando correctamente con acceso a los hosts de Hyper-V.
 - Descarga la imagen ISO de Windows Server 2022 Core Data Center y guárdala en una ruta accesible para el playbook.
 
 ### Configuración de Variables
+
 Antes de ejecutar el playbook, configura las variables en el archivo YAML según sea necesario:
+
 ```yaml
 domain_name: "example.local"
 domain_admin_user: "Admin"
@@ -40,7 +42,6 @@ all_vms:
   - name: "AppServerVM"
     role: "appserver"
     disk_path: "C:\\path\\to\\appserver_diff_disk.vhdx"
-```
 
 ### Ejecución del Playbook
 
