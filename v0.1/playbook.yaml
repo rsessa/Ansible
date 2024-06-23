@@ -151,14 +151,27 @@
         ansible_winrm_server_cert_validation: ignore
 
     - name: Issue Certificates for Domain Machines
-      win_shell: |
-        $machines = @("WebServerVM", "DatabaseVM", "AppServerVM")
-        foreach ($machine in $machines) {
-          certreq -new -f -iv C:\\path\\to\\$machine.inf -out C:\\path\\to\\$machine.req
-          certreq -submit -config "SubCA" C:\\path\\to\\$machine.req C:\\path\\to\\$machine.cer
-          certreq -accept C:\\path\\to\\$machine.cer
-        }
-      when: item.role == "sub_ca"
+      block:
+        - name: Issue Certificate for Web Server
+          win_shell: |
+            certreq -new -f -iv C:\\path\\to\\WebServerVM.inf -out C:\\path\\to\\WebServerVM.req
+            certreq -submit -config "SubCA" C:\\path\\to\\WebServerVM.req C:\\path\\to\\WebServerVM.cer
+            certreq -accept C:\\path\\to\\WebServerVM.cer
+          when: item.role == "webserver"
+
+        - name: Issue Certificate for Database
+          win_shell: |
+            certreq -new -f -iv C:\\path\\to\\DatabaseVM.inf -out C:\\path\\to\\DatabaseVM.req
+            certreq -submit -config "SubCA" C:\\path\\to\\DatabaseVM.req C:\\path\\to\\DatabaseVM.cer
+            certreq -accept C:\\path\\to\\DatabaseVM.cer
+          when: item.role == "database"
+
+        - name: Issue Certificate for App Server
+          win_shell: |
+            certreq -new -f -iv C:\\path\\to\\AppServerVM.inf -out C:\\path\\to\\AppServerVM.req
+            certreq -submit -config "SubCA" C:\\path\\to\\AppServerVM.req C:\\path\\to\\AppServerVM.cer
+            certreq -accept C:\\path\\to\\AppServerVM.cer
+          when: item.role == "appserver"
       loop: "{{ vms }}"
       vars:
         ansible_connection: winrm
@@ -207,30 +220,4 @@
         ansible_connection: winrm
         ansible_user: "{{ vm_admin_user }}"
         ansible_password: "{{ vm_admin_password }}"
-        ansible_port: 5986
-        ansible_winrm_server_cert_validation: ignore
-
-    - name: Ensure IIS service is running for Web Server
-      win_service:
-        name: W3SVC
-        start_mode: auto
-        state: started
-      when: item.role == "webserver"
-      loop: "{{ vms }}"
-      vars:
-        ansible_connection: winrm
-        ansible_user: "{{ vm_admin_user }}"
-        ansible_password: "{{ vm_admin_password }}"
-        ansible_port: 5986
-        ansible_winrm_server_cert_validation: ignore
-
-    - name: Ensure SQL Server service is running for Database
-      win_service:
-        name: MSSQLSERVER
-        start_mode: auto
-        state: started
-      when: item.role == "database"
-      loop: "{{ vms }}"
-      vars:
-        ansible_connection: winrm
-        ansible_user: "{{ vm_admin
+       
